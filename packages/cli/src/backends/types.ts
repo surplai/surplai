@@ -7,9 +7,15 @@ export type TaskInput = {
   issueBody: string;
 };
 
+export type ChangedFile = {
+  path: string;
+  content: string;
+};
+
 export type TaskResult = {
   success: boolean;
   patch: string;
+  files: ChangedFile[];
   modelUsed: string;
   error?: string;
 };

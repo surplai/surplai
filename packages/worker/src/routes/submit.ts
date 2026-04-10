@@ -1,28 +1,31 @@
 import { Hono } from "hono";
 import type { Env } from "../index";
-import { createPullRequest } from "../github";
+import { createPullRequest, type ChangedFile } from "../github";
 
 export const submitRoute = new Hono<{ Bindings: Env }>();
 
-// POST /submit — patch送信 → PR作成
+// POST /submit — patch + files送信 → PR作成
 submitRoute.post("/", async (c) => {
-  const { task_id, donor_handle, patch, model_used } = await c.req.json<{
-    task_id: string;
-    donor_handle: string;
-    patch: string;
-    model_used: string;
-  }>();
+  const { task_id, donor_handle, patch, files, model_used } =
+    await c.req.json<{
+      task_id: string;
+      donor_handle: string;
+      patch: string;
+      files: ChangedFile[];
+      model_used: string;
+    }>();
 
-  if (!task_id || !donor_handle || !patch) {
+  if (!task_id || !donor_handle || !patch || !files?.length) {
     return c.json(
-      { error: "task_id, donor_handle, and patch are required" },
+      { error: "task_id, donor_handle, patch, and files are required" },
       400
     );
   }
 
-  // patchサイズ制限 (1MB)
-  if (patch.length > 1_000_000) {
-    return c.json({ error: "Patch too large (max 1MB)" }, 413);
+  // サイズ制限 (全体で1MB)
+  const totalSize = JSON.stringify(files).length;
+  if (totalSize > 1_000_000) {
+    return c.json({ error: "Payload too large (max 1MB)" }, 413);
   }
 
   // タスクがこのドナーにclaimされているか確認
@@ -62,7 +65,7 @@ submitRoute.post("/", async (c) => {
       repo,
       issueNumber: task.issue_number,
       issueTitle: task.issue_title ?? `issue #${task.issue_number}`,
-      patch,
+      files,
       donorHandle: donor_handle,
       modelUsed: model_used ?? "unknown",
     });

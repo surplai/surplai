@@ -43,6 +43,7 @@ export class SurplaiAPI {
     taskId: string;
     donorHandle: string;
     patch: string;
+    files: Array<{ path: string; content: string }>;
     modelUsed: string;
   }): Promise<{ prUrl: string }> {
     const res = await fetch(`${this.baseUrl}/submit`, {
@@ -52,12 +53,20 @@ export class SurplaiAPI {
         task_id: params.taskId,
         donor_handle: params.donorHandle,
         patch: params.patch,
+        files: params.files,
         model_used: params.modelUsed,
       }),
     });
     if (!res.ok) {
-      const body = (await res.json()) as { error: string };
-      throw new Error(body.error ?? `POST /submit failed: ${res.status}`);
+      const text = await res.text();
+      let message = `POST /submit failed: ${res.status}`;
+      try {
+        const body = JSON.parse(text) as { error?: string };
+        if (body.error) message = body.error;
+      } catch {
+        message = `${message} — ${text}`;
+      }
+      throw new Error(message);
     }
     const data = (await res.json()) as { pr_url: string };
     return { prUrl: data.pr_url };

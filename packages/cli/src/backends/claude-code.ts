@@ -1,9 +1,9 @@
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Backend, TaskInput, TaskResult } from "./types.js";
+import type { Backend, ChangedFile, TaskInput, TaskResult } from "./types.js";
 
 const execFile = promisify(execFileCb);
 
@@ -67,6 +67,7 @@ export class ClaudeCodeBackend implements Backend {
         return {
           success: false,
           patch: "",
+          files: [],
           modelUsed: "claude-code",
           error: claudeOutput.result ?? "Claude Code returned an error",
         };
@@ -86,12 +87,26 @@ export class ClaudeCodeBackend implements Backend {
         return {
           success: false,
           patch: "",
+          files: [],
           modelUsed: "claude-code",
           error: "No changes were made",
         };
       }
 
-      return { success: true, patch, modelUsed: "claude-code" };
+      // 変更ファイルの一覧と内容を取得
+      const { stdout: filesRaw } = await execFile(
+        "git",
+        ["diff", "--name-only", "HEAD"],
+        { cwd: repoDir }
+      );
+      const filePaths = filesRaw.trim().split("\n").filter(Boolean);
+      const files: ChangedFile[] = [];
+      for (const fp of filePaths) {
+        const content = await readFile(join(repoDir, fp), "utf-8");
+        files.push({ path: fp, content });
+      }
+
+      return { success: true, patch, files, modelUsed: "claude-code" };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }

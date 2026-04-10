@@ -5,4 +5,4 @@ compatibility_date = "2025-04-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "surplai-db"
-database_id = "placeholder-replace-after-creation"
+database_id = "fbb01051-ab5a-4f8e-98d6-06ff5d8c9d2d"

@@ -1,10 +1,7 @@
 /**
- * GitHub App Installation Token取得 + PR作成
- *
- * JWT生成 → Installation Token取得 → GitHub API操作
+ * GitHub App: Installation Token取得 + Git Data APIでコミット + PR作成
  */
 
-/** RSA-PKCS1-v1_5 で JWT を署名する (Web Crypto API) */
 async function createJWT(
   appId: string,
   privateKeyPem: string
@@ -23,7 +20,6 @@ async function createJWT(
   const payloadB64 = encode(payload);
   const signingInput = `${headerB64}.${payloadB64}`;
 
-  // PEMからバイナリへ
   const pemBody = privateKeyPem
     .replace(/-----BEGIN RSA PRIVATE KEY-----/, "")
     .replace(/-----END RSA PRIVATE KEY-----/, "")
@@ -52,7 +48,6 @@ async function createJWT(
   return `${signingInput}.${sigB64}`;
 }
 
-/** GitHub App の Installation Token を取得する */
 async function getInstallationToken(
   appId: string,
   privateKey: string,
@@ -61,7 +56,6 @@ async function getInstallationToken(
 ): Promise<string> {
   const jwt = await createJWT(appId, privateKey);
 
-  // まずinstallation IDを取得
   const installRes = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/installation`,
     {
@@ -79,7 +73,6 @@ async function getInstallationToken(
   }
   const { id: installationId } = (await installRes.json()) as { id: number };
 
-  // Installation Tokenを取得
   const tokenRes = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
@@ -100,7 +93,6 @@ async function getInstallationToken(
   return token;
 }
 
-/** GitHub APIリクエストのヘルパー */
 async function githubApi(
   token: string,
   method: string,
@@ -125,6 +117,11 @@ async function githubApi(
   return res.json();
 }
 
+export type ChangedFile = {
+  path: string;
+  content: string;
+};
+
 export type CreatePRParams = {
   appId: string;
   privateKey: string;
@@ -132,12 +129,12 @@ export type CreatePRParams = {
   repo: string;
   issueNumber: number;
   issueTitle: string;
-  patch: string;
+  files: ChangedFile[];
   donorHandle: string;
   modelUsed: string;
 };
 
-/** patchからPRを作成する */
+/** 変更ファイルからコミットを作成してPRを出す */
 export async function createPullRequest(
   params: CreatePRParams
 ): Promise<string> {
@@ -148,15 +145,16 @@ export async function createPullRequest(
     repo,
     issueNumber,
     issueTitle,
-    patch,
+    files,
     donorHandle,
     modelUsed,
   } = params;
 
   const token = await getInstallationToken(appId, privateKey, owner, repo);
-  const branchName = `surplai/fix-${issueNumber}`;
+  const suffix = Date.now().toString(36);
+  const branchName = `surplai/fix-${issueNumber}-${suffix}`;
 
-  // デフォルトブランチ取得
+  // 1. デフォルトブランチとそのHEAD SHA取得
   const repoInfo = (await githubApi(
     token,
     "GET",
@@ -164,7 +162,6 @@ export async function createPullRequest(
   )) as { default_branch: string };
   const baseBranch = repoInfo.default_branch;
 
-  // ベースブランチのSHA取得
   const baseRef = (await githubApi(
     token,
     "GET",
@@ -172,22 +169,69 @@ export async function createPullRequest(
   )) as { object: { sha: string } };
   const baseSha = baseRef.object.sha;
 
-  // ブランチ作成
-  await githubApi(token, "POST", `/repos/${owner}/${repo}/git/refs`, {
-    ref: `refs/heads/${branchName}`,
-    sha: baseSha,
-  });
+  // 2. ベースコミットのtree SHA取得
+  const baseCommit = (await githubApi(
+    token,
+    "GET",
+    `/repos/${owner}/${repo}/git/commits/${baseSha}`
+  )) as { tree: { sha: string } };
+  const baseTreeSha = baseCommit.tree.sha;
 
-  // patchの各ファイルをコミット（simplified: 1ファイルずつtree API経由）
-  // ここではGit Data APIでpatchを適用する
-  // 簡略化: patch内容をPR bodyに含め、直接コミットする方式は複雑なため
-  // まずはファイル単位のContent APIを使う
+  // 3. 各ファイルのblobを作成
+  const treeItems = [];
+  for (const file of files) {
+    const blob = (await githubApi(
+      token,
+      "POST",
+      `/repos/${owner}/${repo}/git/blobs`,
+      { content: file.content, encoding: "utf-8" }
+    )) as { sha: string };
 
-  // TODO: patchをパースしてファイル単位でContent APIを呼ぶ実装
-  // Phase 1ではCLI側でpushしてもらう方式も検討
-  // 現時点ではPR作成のみ（ブランチへのpush方法は要検討）
+    treeItems.push({
+      path: file.path,
+      mode: "100644" as const,
+      type: "blob" as const,
+      sha: blob.sha,
+    });
+  }
 
-  // PR作成
+  // 4. 新しいtreeを作成
+  const newTree = (await githubApi(
+    token,
+    "POST",
+    `/repos/${owner}/${repo}/git/trees`,
+    { base_tree: baseTreeSha, tree: treeItems }
+  )) as { sha: string };
+
+  // 5. コミット作成
+  const commit = (await githubApi(
+    token,
+    "POST",
+    `/repos/${owner}/${repo}/git/commits`,
+    {
+      message: `fix: ${issueTitle}\n\nFixes #${issueNumber}\nPowered-by: ${donorHandle}\nGenerated-by: surplai (${modelUsed})`,
+      tree: newTree.sha,
+      parents: [baseSha],
+    }
+  )) as { sha: string };
+
+  // 6. ブランチ作成（既存なら更新）
+  try {
+    await githubApi(token, "POST", `/repos/${owner}/${repo}/git/refs`, {
+      ref: `refs/heads/${branchName}`,
+      sha: commit.sha,
+    });
+  } catch {
+    // ブランチが既に存在する場合は force update
+    await githubApi(
+      token,
+      "PATCH",
+      `/repos/${owner}/${repo}/git/refs/heads/${branchName}`,
+      { sha: commit.sha, force: true }
+    );
+  }
+
+  // 7. PR作成
   const pr = (await githubApi(
     token,
     "POST",

@@ -16,15 +16,16 @@ claimRoute.post("/", async (c) => {
     return c.json({ error: "task_id and donor_handle are required" }, 400);
   }
 
-  // openまたはTTL切れのclaimedタスクのみclaim可能
+  // open、同じドナーのclaimed、またはTTL切れのclaimedタスクをclaim可能
   const result = await c.env.DB.prepare(
     `UPDATE tasks
      SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now')
      WHERE id = ?
        AND (status = 'open'
+            OR (status = 'claimed' AND claimed_by = ?)
             OR (status = 'claimed' AND claimed_at < datetime('now', ?)))`
   )
-    .bind(donor_handle, task_id, `-${CLAIM_TTL_MINUTES} minutes`)
+    .bind(donor_handle, task_id, donor_handle, `-${CLAIM_TTL_MINUTES} minutes`)
     .run();
 
   if (result.meta.changes === 0) {

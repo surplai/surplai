@@ -14,6 +14,12 @@ export type Env = {
 
 const app = new Hono<{ Bindings: Env }>();
 
+// グローバルエラーハンドラー
+app.onError((err, c) => {
+  console.error("Unhandled error:", err.message, err.stack);
+  return c.json({ error: err.message }, 500);
+});
+
 app.use("/*", cors());
 
 app.get("/", (c) =>

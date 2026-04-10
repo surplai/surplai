@@ -56,6 +56,7 @@ export async function executeTask(
     taskId,
     donorHandle: handle,
     patch: result.patch,
+    files: result.files,
     modelUsed: result.modelUsed,
   });
 
