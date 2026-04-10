@@ -1,0 +1,6 @@
+{
+  "name": "surplai",
+  "private": true,
+  "description": "Route unused AI resources to where they're needed most",
+  "license": "MIT"
+}

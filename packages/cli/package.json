@@ -1,0 +1,23 @@
+{
+  "name": "surplai",
+  "version": "0.0.1",
+  "description": "Route unused AI resources to where they're needed most",
+  "type": "module",
+  "bin": {
+    "surplai": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^13"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsup": "^8",
+    "tsx": "^4",
+    "typescript": "^5"
+  },
+  "license": "MIT"
+}
